@@ -1,0 +1,36 @@
+{
+  "python.defaultInterpreterPath": "c:\\Users\\alexr\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+  "workbench.colorTheme": "Default Dark Modern",
+  "editor.tabSize": 4,
+  "editor.insertSpaces": true,
+  "editor.formatOnSave": true,
+  "editor.quickSuggestions": {
+    "other": true,
+    "comments": false,
+    "strings": true
+  },
+  "editor.suggest.snippetsPreventQuickSuggestions": false,
+  "editor.suggestSelection": "first",
+  "editor.inlineSuggest.enabled": true,
+  "github.copilot.advanced": {
+    "inlineSuggest.enable": true,
+    "panel.enable": true,
+    "editor.enableAutoCompletions": true
+  },
+  "github.copilot.inlineSuggest.enable": true,
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  },
+  "python.analysis.typeCheckingMode": "basic",
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": true,
+  "python.linting.pylintArgs": [
+    "--disable=C0114,C0115,C0116"
+  ],
+  "python.formatting.provider": "black",
+  "python.formatting.blackArgs": [
+    "--line-length",
+    "88"
+  ]
+}
