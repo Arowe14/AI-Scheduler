@@ -10,7 +10,6 @@ from dateparser.search import search_dates
 import event
 
 
-# API KEY: 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
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 now = datetime.now()
@@ -27,12 +26,10 @@ def parse_date(text: str) -> date | None:
 
 
 def clean_json(content: str) -> str:
-    # Remove ```json ... ``` or ``` ... ```
     return re.sub(r"^```(?:json)?\n|\n```$", "", content.strip())
 
 
 def interpret_input(calendar_names: list[str], text: str) -> Event:
-    # Prompt GPT to extract structured event details
     prompt = f"""
 You are an event interpreter. Today's date is {today}. 
 Extract structured calendar event details from natural language.
