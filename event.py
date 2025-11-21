@@ -2,47 +2,62 @@ from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
 class Event:
-    def __init__(self, summary, _date=None, start=None, end=None, **kwargs):
-        """
-        Initialize an Event instance.
-        event_type can be 'timed', 'chore', or 'todo'.
-        """
+    def __init__(self, summary, _date=None, start=None, end=None,**kwargs):
         self.id = kwargs.get('id', None)
         self.summary = summary
         self.date = _date
-        self.start = datetime.fromisoformat(start) if isinstance(start, str) else start
-        self.duration = kwargs.get('duration', 60)  # in minutes
-        self.end = datetime.fromisoformat(end) if isinstance(end, str) else end
-        if self.date==None and self.start:
-            self.date=self.start.date()
+
+        # Normalize start
+        if isinstance(start, str):
+            self.start = datetime.fromisoformat(start)
+        else:
+            self.start = start
+        if self.start and self.start.tzinfo is None:
+            self.start = self.start.replace(tzinfo=kwargs.get('timezone'))
+
+        # Normalize end
+        if isinstance(end, str):
+            self.end = datetime.fromisoformat(end)
+        else:
+            self.end = end
+        if self.end and self.end.tzinfo is None:
+            self.end = self.end.replace(tzinfo=kwargs.get('timezone'))
+
+        self.duration = kwargs.get('duration', 60)
+        if self.date is None and self.start:
+            self.date = self.start.date()
 
         self.location = kwargs.get('location', '')
         self.description = kwargs.get('description', '')
         self.calendar_name = kwargs.get('calendar_name', 'primary')
         self.event_type = kwargs.get('event_type', None)
 
-    def _infer_event_type(self):
-        """Infer event type based on provided attributes."""
-        if self.start and self.end:
-            self.event_type = 'timed'
-        elif self.date:
-            self.event_type = 'chore'
-        else:
-            self.event_type = 'todo'
-
 
     @classmethod
-    def from_dict(cls, data):
-        """Create an Event instance from a dictionary."""
+    def from_dict(cls, data, timezone=ZoneInfo('America/Toronto')):
+        """Create an Event instance from a dictionary (ignores event_type correctness)."""
         start_time = None
         end_time = None
 
-        if data.get('start'):
-            if 'T' in data.get('start'):
-                start_time = datetime.fromisoformat(data.get('start'))
-        if data.get('end'):
-            if 'T' in data.get('end'):
-                end_time = datetime.fromisoformat(data.get('end'))
+        # Parse start time
+        start_val = data.get('start')
+        if start_val and 'T' in start_val:
+            start_time = datetime.fromisoformat(start_val)
+            if timezone:
+                if start_time.tzinfo is None:
+                    start_time = start_time.replace(tzinfo=timezone)
+                else:
+                    start_time = start_time.astimezone(timezone)
+
+        # Parse end time
+        end_val = data.get('end')
+        if end_val and 'T' in end_val:
+            end_time = datetime.fromisoformat(end_val)
+            if timezone:
+                if end_time.tzinfo is None:
+                    end_time = end_time.replace(tzinfo=timezone)
+                else:
+                    end_time = end_time.astimezone(timezone)
 
         return cls(
             summary=data.get('summary'),
@@ -53,9 +68,10 @@ class Event:
             location=data.get('location'),
             description=data.get('description'),
             calendar_name=data.get('calendarName', 'primary'),
-            event_type=data.get('event_type'),
+            event_type=data.get('eventType'),
             id=data.get('id')
         )
+
 
     def to_dict(self):
         """Convert the Event instance to a dictionary."""
@@ -88,3 +104,4 @@ class Event:
             },
         }
         return event
+    

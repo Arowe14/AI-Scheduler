@@ -6,7 +6,9 @@ import interpreter
 from datetime import date, datetime, timedelta
 
 today = date.today()
-current_day = today
+days_since_monday = today.weekday()  # how many days past Monday
+current_day = today - timedelta(days=days_since_monday)
+
 palette = [
     (200, 50, 50, 155),    # red
     (50, 200, 50, 155),    # green
@@ -98,14 +100,19 @@ def run_interface(calendar: Calendar):
             chat_text_items.append(txt_user)
             dpg.set_value(input_id, "")
             dpg.configure_item(input_id, height=30)
+            print("1: ", len(event_list))
 
             events = process_multiline_input(text)
             event_list, to_add, to_delete = calendar.schedule_events(events, event_list)
+            for event in to_add:
+                print("Adding event from display:", event.summary, event.start)
+            print("2: ", len(event_list))
 
             for event in to_delete:
                 print("Deleting event from display:", event.summary, event.start)
             event_list = remove_duplicates(event_list, to_delete)
-            
+            print("3: ", len(event_list))
+
 
             for event in to_add:
                 txt_ai = dpg.add_text(
@@ -113,11 +120,16 @@ def run_interface(calendar: Calendar):
                     parent=chat_area, color=ai_color, wrap=wrap
                 )
                 chat_text_items.append(txt_ai)
+            print("4: ", len(event_list))
 
-            event_list.extend(events)
+            for event in to_add:
+                print("TO ADD: ", event.summary)
+
             to_add_events.extend(to_add)
+            print("To add events count:", len(to_add_events))
             to_delete_events.extend(to_delete)
-
+            event_list.extend(to_add)
+            # event_list = extend_without_duplicates(event_list, to_add)
             draw_events(current_day)
             calendar.save_events(event_list, filename="events.json")
 
@@ -287,8 +299,8 @@ def run_interface(calendar: Calendar):
         # Rows 1–24 → hour labels in first column
         for h_idx in range(hours):
             y = header_height + h_idx * hour_height
-            hour_12 = (h_idx % 12) or 12
-            suffix = "AM" if h_idx < 12 else "PM"
+            hour_12 = ((h_idx+1) % 12) or 12
+            suffix = "AM" if (h_idx+1) < 12 else "PM"
             label = f"{hour_12}:00{suffix}"
 
             dpg.draw_text((5, y + 5), label, size=16, color=time_color, parent="calendar_grid")
@@ -326,30 +338,57 @@ def run_interface(calendar: Calendar):
             day_offset = (event.start.date() - current_day).days
             if not (0 <= day_offset < 7):
                 continue
+            if event.start.date() != event.end.date():
+                event_span = (event.end.date() - event.start.date()).days
+                if event.end.hour == 0 and event.end.minute == 0:
+                    event_span -= 1
+                for day in range(event_span + 1):
+                    if day == 0:
+                        start_hour, start_min = event.start.hour, event.start.minute
+                        end_hour, end_min = 24, 0
+                    elif day == (event.end.date() - event.start.date()).days:
+                        start_hour, start_min = 0, 0
+                        end_hour, end_min = event.end.hour, event.end.minute
+                    else:
+                        start_hour, start_min = 0, 0
+                        end_hour, end_min = 24, 0
+                    create_rect_for_event(event, day_offset + day, start_hour, start_min, end_hour, end_min)
+            else:
+                start_hour, start_min = event.start.hour, event.start.minute
+                end_hour, end_min = event.end.hour, event.end.minute
+                create_rect_for_event(event, day_offset, start_hour, start_min, end_hour, end_min) 
 
-            start_hour, start_min = event.start.hour, event.start.minute
-            end_hour, end_min = event.end.hour, event.end.minute
 
-            m = GRID_METRICS
+    def create_rect_for_event(event, day_offset, start_hour, start_min, end_hour, end_min):
+        m = GRID_METRICS
 
-            x1 = m["time_col_width"] + day_offset * m["day_col_width"]
-            x2 = m["time_col_width"] + (day_offset + 1) * m["day_col_width"]
+        x1 = m["time_col_width"] + day_offset * m["day_col_width"]
+        x2 = m["time_col_width"] + (day_offset + 1) * m["day_col_width"]
 
-            y1 = m["header_height"] + start_hour * m["hour_height"] + (start_min / 60) * m["hour_height"]
-            y2 = m["header_height"] + end_hour * m["hour_height"] + (end_min / 60) * m["hour_height"]
+        y1 = m["header_height"] + start_hour * m["hour_height"] + (start_min / 60) * m["hour_height"]
+        y2 = m["header_height"] + end_hour * m["hour_height"] + (end_min / 60) * m["hour_height"]
 
-            color = calendar_colors.get(event.calendar_name, (100, 100, 100, 175))
-            rect_id = dpg.draw_rectangle((x1, y1), (x2, y2), color=color, fill=color, parent="calendar_grid")
-            text_id = dpg.draw_text((x1 + 5, y1 + 5), event.summary, size=16,
-                                    color=(255, 255, 255, 255), parent="calendar_grid")
+        color = calendar_colors.get(event.calendar_name, (100, 100, 100, 175))
+        rect_id = dpg.draw_rectangle((x1, y1), (x2, y2), color=color, fill=color, parent="calendar_grid")
+        text_id = dpg.draw_text((x1 + 5, y1 + 5), event.summary, size=16,
+                                color=(255, 255, 255, 255), parent="calendar_grid")
 
-            # Track what you just drew
-            drawn_events.extend([rect_id, text_id])
+        # Track what you just drew
+        drawn_events.extend([rect_id, text_id])
 
     def add_events(events):
-        for event in events:
-            print("Adding event to Google Calendar:", event.summary, event.start)
+        nonlocal to_add_events, to_delete_events
+        wrap = get_chat_wrap()
+        dpg.add_text("Adding to Google Calendar...", parent="chat_message_area",
+            color=ai_color, wrap=wrap)
+
+        for event in to_delete_events:
+            calendar._remove_event(event)
         calendar.add_events(events)
+        to_add_events.clear()
+        to_delete_events.clear()
+        dpg.add_text("Done! Anything else?", parent="chat_message_area",
+            color=ai_color, wrap=wrap)
         
     def get_events(current_day):
         nonlocal event_list
@@ -360,17 +399,16 @@ def run_interface(calendar: Calendar):
             already_added_events = calendar.get_events(current_day+timedelta(days=i))
             calendar.save_events(already_added_events, filename="events.json")
             event_list = extend_without_duplicates(event_list, already_added_events)
-            draw_events(current_day)
+        draw_events(current_day)
         dpg.add_text("Events fetched and displayed.", parent="chat_message_area",
             color=ai_color, wrap=wrap)
 
     
-    def process_multiline_input(text):
+    def process_multiline_input(text)-> list[Event]:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         results = []
         for line in lines:
             event = interpreter.interpret_input(calendar_names, line)
-            print("Interpreted Event:", event.summary, event.date)
             results.append(event)
         return results
 

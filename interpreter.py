@@ -7,8 +7,6 @@ from datetime import datetime, date, time, timedelta
 from dotenv import load_dotenv
 from dateparser.search import search_dates
 
-import event
-
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -20,7 +18,6 @@ def parse_date(text: str) -> date | None:
     if results:
         # returns list of tuples [(matched_text, datetime_obj)]
         _, dt = results[0]
-        print("Parsed date:", dt.date())
         return dt.date()
     return None
 
@@ -69,13 +66,7 @@ Respond with only the JSON object.
     cleaned = clean_json(content)
     event_data = json.loads(cleaned)
 
-
-    for item in event_data:
-        print(event_data[item])
-
     event = Event.from_dict(event_data)
-    print("Date: ", event.date)
-    print("Start: ", event.start)
     if not event.date:
         event.date = parse_date(text)
 
@@ -89,26 +80,23 @@ Respond with only the JSON object.
     event.end = event.start + timedelta(minutes=event.duration) if event.start else None
     if event.start:
         event.event_type = 'timed'
-        print(event.summary, ": Timed event detected.")
     elif event.date:
         event.event_type = 'chore'
-        print(event.summary, ": Chore event detected.")
     else:
         event.event_type = 'todo'
-        print(event.summary, event.date, ": Todo event detected.")
     return event
 
 
 def determine_event_type(events) -> list[str]:
-    event_titles = [e.summary for e in events]
-    events_text = "\n".join(event_titles)
+    event_details = [e.description or e.summary for e in events]
+    events_text = "\n".join(event_details)
 
     prompt = f"""
 You are an event classifier. Given the following event titles, classify each as 'timed', 'chore', or 'todo'.
 Rules:
-- 'timed': an event with a specific start and end time (e.g., meetings, appointments).
-- 'chore': an event with a specific date but no specific time (e.g., grocery shopping, cleaning).
-- 'todo': an event with no specific date or time (e.g., general tasks, reminders).
+- 'timed': an event with a specific start and end time (e.g., Work meetings, appointments).
+- 'chore': an event with no specific time (e.g., grocery shopping, cleaning).
+
 
 Events: {events_text}
 

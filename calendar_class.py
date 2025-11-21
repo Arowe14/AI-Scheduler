@@ -51,8 +51,6 @@ class Calendar:
         calendar_id = self.name_to_id.get(event.calendar_name, 'primary')
         event_body = event.to_google_format(self.timezone)
 
-        print(f"Event start: {event.start}, Type: {type(event.start)}")
-        print(f"Event end: {event.end}, Type: {type(event.end)}")
         try:
             created_event = self.service.events().insert(
                 calendarId=calendar_id,
@@ -60,12 +58,10 @@ class Calendar:
             ).execute()
 
             html_link = created_event.get('htmlLink', 'No link available')
-            print(f"✅ Event created in '{event.calendar_name}': {html_link}")
             return created_event
 
         except HttpError as error:
             error_details = error.content.decode("utf-8") if hasattr(error, "content") else str(error)
-            print(f"❌ Failed to create '{event.summary}' in '{event.calendar_name}': {error_details}")
             try:
                 print("Event body sent to API:")
                 print(json.dumps(event_body, indent=2))
@@ -87,7 +83,6 @@ class Calendar:
                 calendarId=calendar_id,
                 eventId=event.id
             ).execute()
-            print(f"Event {event.id} deleted from {event.calendar_name}.")
         except Exception as e:
             print(f"Error deleting event {event.id}: {e}")
 
@@ -213,38 +208,52 @@ class Calendar:
             to_remove (list[Event]): Events to be removed (Old copies that were rescheduled).
         """
         scheduled_event_list = existing_events.copy()
+        exist_length = len(existing_events)
+
+        for e in scheduled_event_list:
+            print("Existing event: ", e.summary, e.event_type)
         to_add = []
         to_remove = []
         # Separate new events into types
         timed_events = [e for e in new_events if e.event_type == 'timed']
         chores = [e for e in new_events if e.event_type == 'chore']
         todos = [e for e in new_events if e.event_type == 'todo']
-
+        print("Final scheduled events amount 0: ", len(scheduled_event_list))
         # Handle timed events first (may cause rescheduling of chores)
         for event in timed_events:
-            to_remove.extend(copy.deepcopy(self._reschedule_conflicting_events(event)))
-            scheduled_event_list.append(event)
+            conflict = self._find_conflicting_events(event)
+            if conflict:
+                for c in conflict:
+                    print("Conflicting event found:", c.summary, c.event_type)
+                    if c.event_type == 'chore':
+                        print(f"Rescheduling chore '{c.summary}' due to conflict with timed event '{event.summary}'.")
+                        # Remove by ID instead of object identity
+                        scheduled_event_list = [e for e in scheduled_event_list if e.id != c.id]
+                        to_remove.append(c)
+                        chores.append(c)
+                    else:
+                        print(f"Timed event '{event.summary}' conflicts with another timed event; not rescheduling.")
+
             to_add.append(event)
-        
-        chores = to_remove + chores
+        print("Final scheduled events amount 1: ", len(scheduled_event_list))
 
         # Schedule chores
         for chore in chores:
             scheduled_chore = self._schedule_chore(chore, scheduled_event_list)
-            scheduled_event_list.append(scheduled_chore)
             to_add.append(scheduled_chore)
-
+        print("Final scheduled events amount 2: ", len(scheduled_event_list))
         # Schedule todos
         for todo in todos:
             scheduled_todo = self._schedule_todo(todo, scheduled_event_list)
-            scheduled_event_list.append(scheduled_todo)
             to_add.append(scheduled_todo)
-
+        print("Final scheduled events amount 3: ", len(scheduled_event_list))
         return scheduled_event_list, to_add, to_remove
 
-    def _read_events(self, timed_start, timed_end, timed_date) -> list[Event]:
-        """Read events from events.json for the given times.
-        Returns a list of event objects within those times."""
+    def _read_events(self, timed_start, timed_end) -> list[Event]:
+        """
+        Read events from events.json that overlap the given time window.
+        Returns a list of Event objects.
+        """
         events = []
 
         events_path = Path("events.json")
@@ -258,22 +267,36 @@ class Calendar:
             except json.JSONDecodeError:
                 print("Error decoding events.json.")
                 return events
-            
-        date_str = timed_date.isoformat()
-        start_str = timed_start.isoformat()
-        end_str = timed_end.isoformat()
 
-        if date_str not in all_events:
-            return events
+        # Collect all date keys that fall within the time window
+        current_date = timed_start.date()
+        end_date = timed_end.date()
+        date_keys = []
+        while current_date <= end_date:
+            date_keys.append(current_date.isoformat())
+            current_date += timedelta(days=1)
 
-        for event_data in all_events[date_str]:
-            event_start = event_data.get('start')
-            event_end = event_data.get('end')
+        # Only iterate over relevant date buckets
+        for date_key in date_keys:
+            if date_key not in all_events:
+                continue
 
-            if event_end >= start_str or event_start <= end_str:
-                events.append(Event.from_dict(event_data))
+            for event_data in all_events[date_key]:
+                if not isinstance(event_data, dict):
+                    print("Skipping malformed event:", event_data)
+                    continue
+
+                print("Event: ", event_data.get('summary'), event_data.get('eventType'))
+                event = Event.from_dict(event_data, timezone=ZoneInfo(self.timezone))
+                print("Loaded event:", event.summary, "Type:", event.event_type)
+
+                # Only include if event overlaps the time window
+                if event.start and event.end:
+                    if event.start < timed_end and event.end > timed_start:
+                        events.append(event)
 
         return events
+
 
     def _schedule_chore(self, event, existing_events):
         """
@@ -292,7 +315,10 @@ class Calendar:
             if e.date == date:
                 busy_times.append({"start": e.start, "end": e.end})
 
-        # Sort busy times by start time
+
+        for b in busy_times:
+            print("Busy:", b["start"], b["start"].tzinfo)
+
         busy_times.sort(key=lambda b: b["start"])
 
         # Find the first available slot
@@ -319,7 +345,7 @@ class Calendar:
             event.end   = slot_start + timedelta(minutes=event.duration)
             return event
 
-        return None  # Return unscheduled if no slot found
+        return event  # Return unscheduled if no slot found
 
 
     def _schedule_todo(self, event, event_list):
@@ -333,15 +359,16 @@ class Calendar:
             if self._schedule_chore(event, event_list):
                 return event
         print(f"No available slot found for todo '{event.summary}' in the next 7 days.")
-        return None
+        return event
 
-    def _reschedule_conflicting_events(self, timed_event):
+    def _find_conflicting_events(self, timed_event):
         """
         Returns conflicting chores to be rescheduled.
         """
-        conflicting_chores = []
-        conflicting_events = self._read_events(timed_event.start, timed_event.end, timed_event.date)
+        start = timed_event.start.astimezone(ZoneInfo(self.timezone))
+        end = timed_event.end.astimezone(ZoneInfo(self.timezone))
+
+        conflicting_events = self._read_events(start, end)
         for event in conflicting_events:
-            if event.event_type == 'chore':
-                conflicting_chores.append(event)
-        return conflicting_chores
+            print(f"Found conflicting event: {event.summary} ({event.start} - {event.end}), type: {event.event_type}")
+        return conflicting_events
